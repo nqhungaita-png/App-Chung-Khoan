@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.express as px
 from plotly.subplots import make_subplots
 import time
 from datetime import datetime, timedelta
@@ -32,8 +33,20 @@ def save_watchlist(data):
     with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# Tạo 4 Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🔍 Phân Tích Từng Mã", "🚀 Quét Toàn Thị Trường (VN30)", "🧪 Kiểm Thử Lịch Sử (Backtest)", "📋 Theo Dõi (Watchlist)"])
+PORTFOLIO_FILE = "portfolio.json"
+
+def load_portfolio():
+    if os.path.exists(PORTFOLIO_FILE):
+        with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def save_portfolio(data):
+    with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# Tạo 5 Tabs (Thêm Tab 5 cho Phái sinh)
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🔍 Phân Tích Cơ Sở", "🚀 Quét Thị Trường (VN30)", "🧪 Backtest", "💼 Quản Lý Danh Mục (Portfolio)", "⚡ Phái Sinh VN30F1M"])
 
 with tab1:
     st.markdown("Hệ thống tự động lọc và đánh dấu các tín hiệu VSA trên biểu đồ giá.")
@@ -286,6 +299,40 @@ with tab2:
         if not scan_results.empty:
             st.success("🎉 Đã tìm thấy các mã có tín hiệu đáng chú ý hôm nay!")
             st.dataframe(scan_results, use_container_width=True)
+            
+        # --- BẢN ĐỒ LUÂN CHUYỂN DÒNG TIỀN (HEATMAP) ---
+        st.markdown("---")
+        st.markdown("### 🗺️ Bản Đồ Luân Chuyển Dòng Tiền (Sector Rotation)")
+        if st.button("Tải Bản Đồ Dòng Tiền (Heatmap)"):
+            hm_bar = st.progress(0, text="Khởi tạo dữ liệu...")
+            def update_hm_progress(current, total, symbol_name):
+                percent = int((current / total) * 100)
+                hm_bar.progress(percent, text=f"Đang phân tích {symbol_name}... ({current}/{total})")
+                
+            with st.spinner("Đang phân tích sức mạnh các nhóm ngành... (Có thể mất 30s - 1 phút nếu mạng chậm)"):
+                hm_scanner = MarketScanner(symbols=VN30_SYMBOLS)
+                sector_df = hm_scanner.scan_sector_rotation(progress_callback=update_hm_progress)
+                hm_bar.empty()
+                if not sector_df.empty:
+                    # Lọc bỏ các mã không có dữ liệu
+                    sector_df = sector_df.dropna(subset=['PctChange', 'RS'])
+                    # Vẽ Treemap
+                    fig_tree = px.treemap(
+                        sector_df, 
+                        path=[px.Constant("Thị trường (VN30)"), 'Sector', 'Symbol'], 
+                        values='Volume',
+                        color='PctChange',
+                        color_continuous_scale='RdYlGn',
+                        color_continuous_midpoint=0,
+                        hover_data=['RS', 'Close'],
+                        title="Bản Đồ Dòng Tiền (Kích thước: Khối lượng | Màu sắc: % Tăng/Giảm)"
+                    )
+                    fig_tree.update_traces(textinfo="label+text+value")
+                    fig_tree.update_layout(height=600, template='plotly_dark', margin=dict(t=50, l=25, r=25, b=25))
+                    st.plotly_chart(fig_tree, use_container_width=True)
+                else:
+                    st.warning("Không thể tải dữ liệu bản đồ.")
+            
             
             # --- TÍCH HỢP TELEGRAM BOT ---
             st.markdown("---")
@@ -593,3 +640,179 @@ with tab4:
                         st.dataframe(styled_bear, use_container_width=True)
                     else:
                         st.info("Không có cảnh báo BÁN rủi ro nào.")
+
+        # --- PORTFOLIO MANAGER ---
+        st.markdown("---")
+        st.markdown("### 📦 Trình Quản Lý Danh Mục Đầu Tư (Portfolio)")
+        
+        portfolio = load_portfolio()
+        
+        col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 1])
+        with col_p1:
+            p_symbol = st.text_input("Mã Cổ Phiếu (VD: HPG)", "").upper()
+        with col_p2:
+            p_price = st.number_input("Giá Vốn (x1000 VNĐ)", min_value=1.0, value=20.0, step=0.1)
+        with col_p3:
+            p_qty = st.number_input("Khối lượng (Cổ phiếu)", min_value=100, value=1000, step=100)
+        with col_p4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("➕ Thêm vào Danh mục"):
+                if p_symbol:
+                    portfolio.append({
+                        "Symbol": p_symbol,
+                        "Buy_Price": p_price,
+                        "Quantity": p_qty,
+                        "Date_Added": datetime.today().strftime('%Y-%m-%d')
+                    })
+                    save_portfolio(portfolio)
+                    st.success(f"Đã thêm {p_symbol} vào danh mục!")
+                    st.rerun()
+                    
+        if portfolio:
+            st.markdown("#### Tình trạng Danh mục Hiện tại")
+            pf_data = []
+            total_invested = 0
+            total_current = 0
+            
+            with st.spinner("Đang cập nhật giá thị trường cho danh mục..."):
+                feed = VNStockDataFeed()
+                end_d = datetime.today()
+                start_d = end_d - timedelta(days=5)
+                
+                for idx, item in enumerate(portfolio):
+                    sym = item['Symbol']
+                    buy_price = item['Buy_Price']
+                    qty = item['Quantity']
+                    
+                    df_recent = feed.fetch_historical_data(sym, start_d.strftime('%Y-%m-%d'), end_d.strftime('%Y-%m-%d'), resolution='1D')
+                    time.sleep(0.1)
+                    
+                    if not df_recent.empty:
+                        curr_price = df_recent.iloc[-1]['Close']
+                    else:
+                        curr_price = buy_price
+                        
+                    invested_val = buy_price * qty * 1000
+                    current_val = curr_price * qty * 1000
+                    pnl_val = current_val - invested_val
+                    pnl_pct = (curr_price - buy_price) / buy_price * 100
+                    
+                    total_invested += invested_val
+                    total_current += current_val
+                    
+                    # Cảnh báo
+                    alert = "✅ An toàn"
+                    if pnl_pct <= -5:
+                        alert = "🚨 VI PHẠM CẮT LỖ (<-5%)"
+                    elif pnl_pct >= 10:
+                        alert = "🎯 ĐẠT TARGET (>10%)"
+                        
+                    pf_data.append({
+                        "Mã CK": sym,
+                        "Khối lượng": f"{qty:,}",
+                        "Giá Vốn": f"{buy_price:.2f}",
+                        "Giá Hiện Tại": f"{curr_price:.2f}",
+                        "Tổng Vốn (VNĐ)": f"{invested_val:,.0f}",
+                        "Lãi/Lỗ (VNĐ)": pnl_val,
+                        "Lãi/Lỗ (%)": pnl_pct,
+                        "Trạng thái": alert
+                    })
+                    
+            df_pf = pd.DataFrame(pf_data)
+            
+            # Styling
+            def color_pnl_val(val):
+                if isinstance(val, (int, float)):
+                    color = 'green' if val > 0 else 'red' if val < 0 else 'gray'
+                    return f'color: {color}'
+                return ''
+                
+            def format_pnl_pct(val):
+                return f"{val:.2f}%"
+                
+            styled_pf = df_pf.style.applymap(color_pnl_val, subset=['Lãi/Lỗ (VNĐ)', 'Lãi/Lỗ (%)'])\
+                .format({'Lãi/Lỗ (VNĐ)': "{:,.0f}", 'Lãi/Lỗ (%)': format_pnl_pct})
+                
+            st.dataframe(styled_pf, use_container_width=True)
+            
+            # Summary
+            total_pnl = total_current - total_invested
+            total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+            
+            col_s1, col_s2, col_s3 = st.columns(3)
+            col_s1.metric("Tổng Vốn Đầu Tư", f"{total_invested:,.0f} đ")
+            col_s2.metric("Giá Trị Hiện Tại", f"{total_current:,.0f} đ")
+            col_s3.metric("Tổng Lãi/Lỗ", f"{total_pnl:,.0f} đ", f"{total_pnl_pct:.2f}%")
+            
+            if st.button("🗑️ Xoá toàn bộ Danh mục"):
+                save_portfolio([])
+                st.rerun()
+
+with tab5:
+    st.markdown("### ⚡ Bảng Chỉ Huy Phái Sinh (VN30F1M)")
+    st.markdown("Hệ thống tự động phân tích đồ thị Phái sinh khung thời gian **15 Phút (Intraday)**.")
+    
+    if st.button("Tải dữ liệu Phái sinh 15M Mới nhất"):
+        with st.spinner("Đang tải dữ liệu Phái sinh Real-time..."):
+            feed = VNStockDataFeed()
+            end_d = datetime.today()
+            start_d = end_d - timedelta(days=15)
+            
+            try:
+                df_ps = feed.fetch_historical_data('VN30F1M', start_d.strftime('%Y-%m-%d'), end_d.strftime('%Y-%m-%d'), resolution='15')
+                if not df_ps.empty:
+                    vsa_ps = VSAIndicator(df_ps)
+                    res_ps = vsa_ps.run_all()
+                    
+                    st.success("Tải dữ liệu thành công! (Lưu ý: Nến cuối cùng có thể chưa đóng cửa)")
+                    
+                    # Vẽ đồ thị
+                    fig_ps = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3], figure=go.Figure())
+                    
+                    # Nến
+                    fig_ps.add_trace(go.Candlestick(x=res_ps['Date'], open=res_ps['Open'], high=res_ps['High'], low=res_ps['Low'], close=res_ps['Close'], name='VN30F1M'), row=1, col=1)
+                    
+                    # MA
+                    fig_ps.add_trace(go.Scatter(x=res_ps['Date'], y=res_ps['MA_20'], mode='lines', line=dict(color='yellow', width=1), name='MA20'), row=1, col=1)
+                    fig_ps.add_trace(go.Scatter(x=res_ps['Date'], y=res_ps['MA_50'], mode='lines', line=dict(color='orange', width=1.5), name='MA50'), row=1, col=1)
+                    
+                    # Volume
+                    colors_vol = ['green' if row['Close'] >= row['Open'] else 'red' for idx, row in res_ps.iterrows()]
+                    fig_ps.add_trace(go.Bar(x=res_ps['Date'], y=res_ps['Volume'], marker_color=colors_vol, name='Volume'), row=2, col=1)
+                    
+                    # Đánh dấu tín hiệu
+                    signals = [
+                        ('Spring', 'Spring', 'green', 'bottom'),
+                        ('Stopping_Volume', 'StopVol', 'lightgreen', 'bottom'),
+                        ('Squat_Bar', 'Squat', 'blue', 'bottom'),
+                        ('mSOS', 'mSOS', 'cyan', 'top'),
+                        ('JAC', 'JAC', 'purple', 'top'),
+                        ('ChoCH', 'ChoCH', 'yellow', 'top'),
+                        ('UTAD', 'UTAD', 'red', 'top'),
+                        ('No_Supply', 'TestCung', 'white', 'bottom'),
+                        ('No_Demand', 'TestCau', 'pink', 'top'),
+                        ('POE', 'POE', 'gold', 'bottom')
+                    ]
+                    
+                    for col_name, label, color, position in signals:
+                        if col_name in res_ps.columns:
+                            signal_points = res_ps[res_ps[col_name] == True]
+                            if not signal_points.empty:
+                                y_pos = signal_points['Low'] * 0.999 if position == 'bottom' else signal_points['High'] * 1.001
+                                fig_ps.add_trace(go.Scatter(
+                                    x=signal_points['Date'], y=y_pos, mode='markers+text',
+                                    marker=dict(symbol='triangle-up' if position=='bottom' else 'triangle-down', size=10, color=color),
+                                    text=label, textposition="bottom center" if position=='bottom' else "top center",
+                                    name=label
+                                ), row=1, col=1)
+                    
+                    fig_ps.update_layout(height=800, template='plotly_dark', xaxis_rangeslider_visible=False)
+                    st.plotly_chart(fig_ps, use_container_width=True)
+                    
+                    st.markdown("### Dữ liệu các nến gần nhất")
+                    st.dataframe(res_ps.tail(10).sort_values('Date', ascending=False), use_container_width=True)
+                else:
+                    st.error("Lỗi: Không tải được dữ liệu Phái sinh. Có thể do ngoài giờ giao dịch hoặc API lỗi.")
+            except Exception as e:
+                st.error(f"Lỗi hệ thống: {e}")
+
