@@ -1,0 +1,29 @@
+[
+    {
+        "Symbol": "ACB",
+        "Date_Scanned": "2026-06-03",
+        "Price_Scanned": 26.0,
+        "Signal": "SOS (Breakout Pha D/E)"
+    },
+    {
+        "Symbol": "BID",
+        "Date_Scanned": "2026-06-03",
+        "Price_Scanned": 41.9,
+        "Low_Scanned": 41.5,
+        "Signal": "No Demand (Test Cầu - Báo Bão)"
+    },
+    {
+        "Symbol": "PLX",
+        "Date_Scanned": "2026-06-03",
+        "Price_Scanned": 39.15,
+        "Low_Scanned": 38.85,
+        "Signal": "No Demand (Test Cầu - Báo Bão)"
+    },
+    {
+        "Symbol": "VCB",
+        "Date_Scanned": "2026-06-03",
+        "Price_Scanned": 61.9,
+        "Low_Scanned": 61.4,
+        "Signal": "No Demand (Test Cầu - Báo Bão)"
+    }
+]
