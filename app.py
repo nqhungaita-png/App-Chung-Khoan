@@ -300,40 +300,6 @@ with tab2:
             st.success("🎉 Đã tìm thấy các mã có tín hiệu đáng chú ý hôm nay!")
             st.dataframe(scan_results, use_container_width=True)
             
-        # --- BẢN ĐỒ LUÂN CHUYỂN DÒNG TIỀN (HEATMAP) ---
-        st.markdown("---")
-        st.markdown("### 🗺️ Bản Đồ Luân Chuyển Dòng Tiền (Sector Rotation)")
-        if st.button("Tải Bản Đồ Dòng Tiền (Heatmap)"):
-            hm_bar = st.progress(0, text="Khởi tạo dữ liệu...")
-            def update_hm_progress(current, total, symbol_name):
-                percent = int((current / total) * 100)
-                hm_bar.progress(percent, text=f"Đang phân tích {symbol_name}... ({current}/{total})")
-                
-            with st.spinner("Đang phân tích sức mạnh các nhóm ngành... (Có thể mất 30s - 1 phút nếu mạng chậm)"):
-                hm_scanner = MarketScanner(symbols=VN30_SYMBOLS)
-                sector_df = hm_scanner.scan_sector_rotation(progress_callback=update_hm_progress)
-                hm_bar.empty()
-                if not sector_df.empty:
-                    # Lọc bỏ các mã không có dữ liệu
-                    sector_df = sector_df.dropna(subset=['PctChange', 'RS'])
-                    # Vẽ Treemap
-                    fig_tree = px.treemap(
-                        sector_df, 
-                        path=[px.Constant("Thị trường (VN30)"), 'Sector', 'Symbol'], 
-                        values='Volume',
-                        color='PctChange',
-                        color_continuous_scale='RdYlGn',
-                        color_continuous_midpoint=0,
-                        hover_data=['RS', 'Close'],
-                        title="Bản Đồ Dòng Tiền (Kích thước: Khối lượng | Màu sắc: % Tăng/Giảm)"
-                    )
-                    fig_tree.update_traces(textinfo="label+text+value")
-                    fig_tree.update_layout(height=600, template='plotly_dark', margin=dict(t=50, l=25, r=25, b=25))
-                    st.plotly_chart(fig_tree, use_container_width=True)
-                else:
-                    st.warning("Không thể tải dữ liệu bản đồ.")
-            
-            
             # --- TÍCH HỢP TELEGRAM BOT ---
             st.markdown("---")
             st.markdown("### 🚀 Bot Telegram - Cảnh Báo Real-Time")
